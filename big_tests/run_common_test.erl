@@ -583,14 +583,82 @@ host_param(Name, {_, Params}) ->
 
 report_time(Description, Fun) ->
 	report_progress("~nExecuting ~ts~n", [Description]),
-	Start = os:timestamp(),
+	Start = erlang:system_time(millisecond),
+    MonPid = spawn_mon(self(), Start),
     try
         Fun()
     after
-        Microseconds = timer:now_diff(os:timestamp(), Start),
+        MonPid ! stop,
+        Microseconds = diff(Start),
         Time = microseconds_to_string(Microseconds),
 		report_progress("~ts took ~ts~n", [Description, Time])
 	end.
+
+spawn_mon(Parent, Start) ->
+    Ref = make_ref(),
+    %% We do not link, because we want to log if the Parent dies
+    Pid = spawn_link(fun() -> run_monitor(Ref, Parent, Start) end),
+    %% Ensure there is no race conditions by waiting till the monitor is added
+    receive
+        {monitor_added, Ref} -> ok
+    end,
+    Pid.
+
+run_monitor(Ref, Parent, Start) ->
+    Mon = erlang:monitor(process, Parent),
+    Parent ! {monitor_added, Ref},
+    Interval = 10000,
+    monitor_loop(Mon, Parent, Start, Interval).
+
+monitor_loop(Mon, Parent, Start, Interval) ->
+    receive
+        {'DOWN', MonRef, process, _Pid, _Reason} when MonRef =:= Mon ->
+            ok;
+        stop ->
+            ok
+    after Interval ->
+        Diff = diff(Start),
+        ST = [{Pid, pinfo(Pid, current_stacktrace, stopped)} || Pid <- monitors(Parent)],
+	report_progress("~nLong task time=~p current_stacktraces=~p~n", [Diff, ST]),
+        monitor_loop(Mon, Parent, Start, Interval)
+    end.
+
+%% Collect a list of Pids if nesting monitoring is used
+monitors(Pid) ->
+   monitors([Pid], [Pid], 50).
+
+monitors([H|T], Used, Max) when Max > 0 ->
+    %% Usually, process monitors other process, when waiting for a call to return
+    MonitoredPids = lists:usort([Pid || {process, Pid} <- pinfo(H, monitors, [])])
+                    -- Used,
+    monitors(T ++ MonitoredPids, Used ++ MonitoredPids, Max - 1);
+monitors(_, Used, _Max) ->
+    Used.
+
+pinfo({Name, Node}, Key, Def) when Node =:= node() ->
+    %% Handle special format for monitored named processes
+    pinfo(whereis(Name), Key, Def);
+pinfo({Name, Node}, Key, Def) when is_atom(Node), is_atom(Name) ->
+    %% Handle special format for monitored named processes
+    case rpc:call(Node, erlang, whereis, [Name]) of
+        Pid when is_pid(Pid) ->
+           pinfo(Pid, Key, Def);
+        _ ->
+           Def
+    end;
+pinfo(Pid, Key, Def) when is_pid(Pid) ->
+    case rpc:pinfo(Pid, Key) of
+        {Key, Val} ->
+            Val;
+        undefined ->
+            Def
+    end;
+pinfo(_Pid, _Key, Def) ->
+    %% Unknown format
+    Def.
+
+diff(Start) ->
+    erlang:system_time(millisecond) - Start.
 
 microseconds_to_string(Microseconds) ->
 	Milliseconds = Microseconds div 1000,
