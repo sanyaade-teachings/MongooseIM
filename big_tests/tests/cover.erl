@@ -1170,7 +1170,7 @@ remote_call(Node,Request) ->
     put(remote_call, {?SERVER,Node}),
     put(remote_call_req, Request),
     Ref = erlang:monitor(process,{?SERVER,Node}),
-    receive {'DOWN', Ref, _Type, _Object, noproc} -> 
+    RETT = receive {'DOWN', Ref, _Type, _Object, noproc} -> 
 	    erlang:demonitor(Ref),
 	    {error,node_dead}
     after 0 ->
@@ -1187,7 +1187,10 @@ remote_call(Node,Request) ->
 		end,
 	    erlang:demonitor(Ref, [flush]),
 	    Return
-    end.
+    end,
+    put(remote_call, {?SERVER,Node}),
+    put(remote_call_req, donee),
+    RETT.
     
 remote_reply(Proc,Reply) when is_pid(Proc) ->
     Proc ! {?SERVER,Reply},
