@@ -1167,6 +1167,8 @@ is_from(From) ->
     is_pid(From).
 
 remote_call(Node,Request) ->
+    put(remote_call, {?SERVER,Node}),
+    put(remote_call_req, Request),
     Ref = erlang:monitor(process,{?SERVER,Node}),
     receive {'DOWN', Ref, _Type, _Object, noproc} -> 
 	    erlang:demonitor(Ref),
@@ -1505,11 +1507,13 @@ remote_process_loop(State) ->
 			  '_' -> [M || {M,_} <- State#remote_state.compiled];
 			  _ -> Modules0
 		      end,
-            spawn_link(fun() ->
+            Pid = spawn_link(fun() ->
                           ?SPAWN_DBG(remote_collect, 
                                      {Modules, CollectorPid, From}),
                           do_collect(Modules, CollectorPid, From)
                   end),
+            monitor(process, Pid),
+            put(remote_collect_pid, Pid),
 	    remote_process_loop(State);
 
 	{remote,stop} ->
@@ -1554,7 +1558,8 @@ try
     _ = pmap(fun(Module) ->
                      send_counters(Module, CollectorPid)
              end, Modules)
-catch _:_ ->
+catch C:R:S ->
+put(do_collect_failed, {C,R,S}),
 ok
 end,
     CollectorPid ! done,
@@ -1562,7 +1567,10 @@ end,
 
 send_chunk(CollectorPid,Chunk) ->
     CollectorPid ! {chunk,Chunk,self()},
-    receive continue -> ok end.
+put(wait_for_continue, true),
+    receive continue -> ok end,
+put(wait_for_continue, false),
+ok.
 
 get_downs([]) ->
     ok;
