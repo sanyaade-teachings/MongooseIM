@@ -270,6 +270,7 @@ enable_preset(Props, Name, PresetVars, N, Tests) ->
 %% Specify just some nodes to run the tests on:
 %% TEST_HOSTS="mim" ./tools/test.sh -p odbc_mssql_mnesia
 maybe_enable_preset_on_node(Node, PresetVars, HostVars, HostName) ->
+    catch mongoose_helper:inject_module(#{node => Node}, cover, reload),
     case is_test_host_enabled(HostName) of
         true ->
             enable_preset_on_node(Node, PresetVars, HostVars);
