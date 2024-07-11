@@ -400,6 +400,7 @@ analyze(_Props, CoverOpts, Nodes) ->
             [cover:import(File) || File <- Files]
         end),
     report_time("Export merged cover data", fun() ->
+cover:ensure_mine(),
 			cover:export("/tmp/mongoose_combined.coverdata")
 		end),
     case os:getenv("GITHUB_RUN_ID") of
