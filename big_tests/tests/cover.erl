@@ -2419,9 +2419,13 @@ collect(Modules0, Nodes) ->
     collect_modules(Modules, Nodes).
 
 collect_modules(Modules, Nodes) ->
-    Mon1 = spawn_monitor(fun() -> pmap(fun move_modules/1, Modules) end),
-    Mon2 = spawn_monitor(fun() -> remote_collect('_', Nodes, false) end),
-    get_downs([Mon1,Mon2]).
+%   Mon1 = spawn_monitor(fun() -> pmap(fun move_modules/1, Modules) end),
+%   Mon2 = spawn_monitor(fun() -> remote_collect('_', Nodes, false) end),
+%   get_downs([Mon1,Mon2]).
+
+    pmap(fun move_modules/1, Modules),
+    remote_collect('_', Nodes, false),
+ok.
 
 %% Collect data for one module
 collect_module(Module, #main_state{nodes=Nodes}) ->
