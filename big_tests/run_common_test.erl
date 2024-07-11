@@ -619,7 +619,7 @@ monitor_loop(Mon, Parent, Start, Interval) ->
             ok
     after Interval ->
         Diff = diff(Start),
-        ST = [{Pid, pinfo(Pid, current_stacktrace, stopped)} || Pid <- monitors(Parent)],
+        ST = [{Pid, pinfo(Pid, current_stacktrace, stopped), pinfo(Pid, dictionary, [])} || Pid <- monitors(Parent)],
 	report_progress("~nLong task time=~p current_stacktraces=~p~n", [Diff, ST]),
         monitor_loop(Mon, Parent, Start, Interval)
     end.

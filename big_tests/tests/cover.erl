@@ -1505,7 +1505,7 @@ remote_process_loop(State) ->
 			  '_' -> [M || {M,_} <- State#remote_state.compiled];
 			  _ -> Modules0
 		      end,
-            spawn(fun() ->
+            spawn_link(fun() ->
                           ?SPAWN_DBG(remote_collect, 
                                      {Modules, CollectorPid, From}),
                           do_collect(Modules, CollectorPid, From)
@@ -1550,9 +1550,13 @@ remote_process_loop(State) ->
     end.
 
 do_collect(Modules, CollectorPid, From) ->
+try
     _ = pmap(fun(Module) ->
                      send_counters(Module, CollectorPid)
-             end, Modules),
+             end, Modules)
+catch _:_ ->
+ok
+end,
     CollectorPid ! done,
     remote_reply(From, ok).
 
@@ -1804,7 +1808,7 @@ remote_collect(Modules,Nodes,Stop) ->
     ok.
 
 do_collection(Node, Module, Stop) ->
-    CollectorPid = spawn(fun collector_proc/0),
+    CollectorPid = spawn_link(fun collector_proc/0),
     case remote_call(Node,{remote,collect,Module,CollectorPid, self()}) of
 	{error,node_dead} ->
 	    CollectorPid ! done,
@@ -3047,8 +3051,10 @@ pmap_spawn(Fun,NPerProc,List,Mons) ->
     pmap_spawn(Fun,NPerProc,L2,[Mon|Mons]).
 
 pmap_collect([],Acc) ->
+    put(pmap_collect, []),
     lists:append(Acc);
 pmap_collect(Mons,Acc) ->
+    put(pmap_collect, Mons),
     receive
 	{'DOWN', Ref, process, Pid, {pmap_done,Result}} ->
 	    pmap_collect(lists:delete({Pid,Ref},Mons),[Result|Acc]);
