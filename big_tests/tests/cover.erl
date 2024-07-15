@@ -1169,7 +1169,9 @@ is_from(From) ->
 remote_call(Node,Request) ->
     put(remote_call, {?SERVER,Node}),
     put(remote_call_req, Request),
-    Ref = erlang:monitor(process,{?SERVER,Node}),
+PID = rpc:call(Node, erlang, whereis, [?SERVER]),
+true = is_pid(PID),
+    Ref = erlang:monitor(process,PID),
     RETT = receive {'DOWN', Ref, _Type, _Object, noproc} -> 
 	    erlang:demonitor(Ref),
 	    {error,node_dead}
@@ -1478,7 +1480,11 @@ init_remote(Starter,MainNode) ->
     ?COVER_MAPPING_TABLE = ets:new(?COVER_MAPPING_TABLE,
                                    [ordered_set, public, named_table]),
     Starter ! {self(),started},
-    remote_process_loop(#remote_state{main_node=MainNode}).
+try
+    remote_process_loop(#remote_state{main_node=MainNode})
+after
+persistent_term:put(remote_terminated, self())
+end.
 
 
 
@@ -1506,6 +1512,7 @@ remote_process_loop(State) ->
 	    self() ! {remote,collect,Module,CollectorPid, ?SERVER};
 
 	{remote,collect,Modules0,CollectorPid,From} ->
+            put(loop_collect, {Modules0,CollectorPid,From}),
 	    Modules = case Modules0 of
 			  '_' -> [M || {M,_} <- State#remote_state.compiled];
 			  _ -> Modules0
@@ -1541,6 +1548,7 @@ remote_process_loop(State) ->
 	    remote_process_loop(State);
 
 	M ->
+ put(bad_msg, M),
 	    io:format("WARNING: remote cover_server received\n~p\n",[M]),
 	    case M of
 		{From,_} ->
