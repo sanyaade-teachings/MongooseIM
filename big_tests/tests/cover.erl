@@ -1820,6 +1820,8 @@ remote_collect(Modules,Nodes,Stop) ->
 
 do_collection(Node, Module, Stop) ->
     CollectorPid = spawn_link(fun collector_proc/0),
+    monitor(process, CollectorPid),
+    put(do_collection, {{Node, Module}, CollectorPid}),
     case remote_call(Node,{remote,collect,Module,CollectorPid, self()}) of
 	{error,node_dead} ->
 	    CollectorPid ! done,
@@ -3063,9 +3065,12 @@ pmap_spawn(Fun,NPerProc,List,Mons) ->
 
 pmap_collect([],Acc) ->
     put(pmap_collect, []),
+    put(pmap_collect_stacks, []),
     lists:append(Acc);
 pmap_collect(Mons,Acc) ->
     put(pmap_collect, Mons),
+    S = [{Pid, rpc:pinfo(Pid, current_stacktrace)} || {Pid, _} <- Mons, is_pid(Pid)],
+    put(pmap_collect_stacks, S),
     receive
 	{'DOWN', Ref, process, Pid, {pmap_done,Result}} ->
 	    pmap_collect(lists:delete({Pid,Ref},Mons),[Result|Acc]);
