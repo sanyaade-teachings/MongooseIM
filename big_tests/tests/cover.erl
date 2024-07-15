@@ -1178,7 +1178,8 @@ true = is_pid(PID),
 	    erlang:demonitor(Ref),
 	    {error,node_dead}
     after 0 ->
-	    {?SERVER,Node} ! Request,
+%    {?SERVER,Node} ! Request,
+     PID ! Request,
 	    Return = 
                 receive_loop(PID, Ref, Request),
 	    erlang:demonitor(Ref, [flush]),
@@ -1498,6 +1499,7 @@ end.
 
 -doc false.
 remote_process_loop(State) ->
+    put(remote_process_loop_mess, erlang:process_info(self(), messages)),
     receive 
 	{remote,load_compiled,Compiled} ->
 	    Compiled1 = load_compiled(Compiled,State#remote_state.compiled),
@@ -1518,6 +1520,7 @@ remote_process_loop(State) ->
 
 	{remote,collect,Module,CollectorPid} ->
 	    self() ! {remote,collect,Module,CollectorPid, ?SERVER};
+
 
 	{remote,collect,Modules0,CollectorPid,From} ->
             put(loop_collect, {Modules0,CollectorPid,From}),
