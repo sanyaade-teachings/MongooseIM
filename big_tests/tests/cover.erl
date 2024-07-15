@@ -1510,13 +1510,14 @@ remote_process_loop(State) ->
 			  '_' -> [M || {M,_} <- State#remote_state.compiled];
 			  _ -> Modules0
 		      end,
-            Pid = spawn_link(fun() ->
-                          ?SPAWN_DBG(remote_collect, 
-                                     {Modules, CollectorPid, From}),
-                          do_collect(Modules, CollectorPid, From)
-                  end),
-            monitor(process, Pid),
-            put(remote_collect_pid, Pid),
+%           Pid = spawn_link(fun() ->
+%                         ?SPAWN_DBG(remote_collect, 
+%                                    {Modules, CollectorPid, From}),
+%                         do_collect(Modules, CollectorPid, From)
+%                 end),
+%           monitor(process, Pid),
+%           put(remote_collect_pid, Pid),
+            do_collect(Modules, CollectorPid, From),
 	    remote_process_loop(State);
 
 	{remote,stop} ->
@@ -1558,9 +1559,13 @@ remote_process_loop(State) ->
 
 do_collect(Modules, CollectorPid, From) ->
 try
-    _ = pmap(fun(Module) ->
-                     send_counters(Module, CollectorPid)
-             end, Modules)
+%   _ = pmap(fun(Module) ->
+%                    send_counters(Module, CollectorPid)
+%            end, Modules)
+   lists:map(fun(Module) ->
+                    put(do_collect_module, Module),
+                    send_counters(Module, CollectorPid)
+            end, Modules)
 catch C:R:S ->
 put(do_collect_failed, {C,R,S}),
 ok
@@ -3069,7 +3074,7 @@ pmap_collect([],Acc) ->
     lists:append(Acc);
 pmap_collect(Mons,Acc) ->
     put(pmap_collect, Mons),
-    S = [{Pid, rpc:pinfo(Pid, current_stacktrace)} || {Pid, _} <- Mons, is_pid(Pid)],
+    S = [{Pid, rpc:pinfo(Pid, current_stacktrace), rpc:pinfo(Pid, dictionary), rpc:pinfo(Pid, messages)} || {Pid, _} <- Mons, is_pid(Pid)],
     put(pmap_collect_stacks, S),
     receive
 	{'DOWN', Ref, process, Pid, {pmap_done,Result}} ->
