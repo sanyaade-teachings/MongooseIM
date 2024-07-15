@@ -18,6 +18,7 @@
 %% %CopyrightEnd%
 %%
 -module(cover).
+-compile([export_all, nowarn_export_all]).
 -moduledoc """
 A Coverage Analysis Tool for Erlang
 
