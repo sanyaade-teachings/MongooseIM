@@ -1180,21 +1180,27 @@ true = is_pid(PID),
     after 0 ->
 	    {?SERVER,Node} ! Request,
 	    Return = 
-		receive 
-		    {'DOWN', Ref, _Type, _Object, _Info} -> 
-			case Request of
-			    {remote,stop} -> ok;
-			    _ -> {error,node_dead}
-			end;
-		    {?SERVER,Reply} -> 
-			Reply
-		end,
+                receive_loop(PID, Ref, Request),
 	    erlang:demonitor(Ref, [flush]),
 	    Return
     end,
     put(remote_call, {?SERVER,Node}),
     put(remote_call_req, donee),
     RETT.
+
+receive_loop(PID, Ref, Request) ->
+	receive 
+	    {'DOWN', Ref, _Type, _Object, _Info} -> 
+		case Request of
+		    {remote,stop} -> ok;
+		    _ -> {error,node_dead}
+		end;
+	    {?SERVER,Reply} -> 
+		Reply
+        after 500 ->
+           put(receive_loop_stack, {rpc:pinfo(PID, current_stacktrace), rpc:pinfo(PID, dictionary)}),
+           receive_loop(PID, Ref, Request)
+	end.
     
 remote_reply(Proc,Reply) when is_pid(Proc) ->
     Proc ! {?SERVER,Reply},
@@ -1825,7 +1831,7 @@ remote_reset(Module,Nodes) ->
 
 %% Collect data from remote nodes - used for analyse or stop(Node)
 remote_collect(Modules,Nodes,Stop) ->
-    _ = pmap(
+    lists:map(
           fun(Node) -> 
                   ?SPAWN_DBG(remote_collect, 
                              {Modules, Nodes, Stop}),
