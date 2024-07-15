@@ -193,6 +193,7 @@ period will be included in the analysis.
          local_only/0]).
 -export([remote_start/1,get_main_node/0]).
 -export([ensure_mine/0]).
+-export([do_collect/3]).
 
 %% Used internally to ensure we upgrade the code to the latest version.
 -export([main_process_loop/1,remote_process_loop/1]).
