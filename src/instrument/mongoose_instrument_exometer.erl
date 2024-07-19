@@ -4,27 +4,92 @@
 
 -define(PREFIXES, {?MODULE, prefixes}).
 
--export([config_spec/0, start/0, stop/0, set_up/3, handle_event/4]).
+-export([config_spec/0, start/1, stop/1, set_up/3, handle_event/4]).
+
+%% Config spec callbacks
+-export([process_graphite_reporter/2]).
 
 -include("mongoose.hrl").
 -include("mongoose_config_spec.hrl").
 
+-type opts() :: #{all_metrics_are_global := boolean(),
+                  report := #{reporter_name() => reporter_opts()}}.
+-type reporter_name() :: atom(). %% exometer_report:reporter_name() is not exported
+-type reporter_opts() :: #{module := module(),
+                           prefix => string(),
+                           env_prefix => string(),
+                           connect_timeout := integer(),
+                           host := string(),
+                           port := inet:port_number(),
+                           api_key := string()}.
+
 -spec config_spec() -> mongoose_config_spec:config_section().
 config_spec() ->
-    #section{items = #{<<"all_metrics_are_global">> => #option{type = boolean}},
-             defaults = #{<<"all_metrics_are_global">> => false}}.
+    #section{items = #{<<"all_metrics_are_global">> => #option{type = boolean},
+                       <<"report">> => report_config_spec()},
+             defaults = #{<<"all_metrics_are_global">> => false}
+            }.
 
--spec start() -> ok.
-start() ->
-    AllGlobal = mongoose_config:get_opt([instrumentation, exometer, all_metrics_are_global]),
+-spec report_config_spec() -> mongoose_config_spec:config_section().
+report_config_spec() ->
+    Reporters = [<<"graphite">>],
+    Common = common_reporter_config_spec(),
+    ReporterSpecs = [{Reporter, #list{items = reporter_config_spec(Common, Reporter), wrap = none}}
+                     || Reporter <- Reporters],
+    #section{items = maps:from_list(ReporterSpecs),
+             include = always}.
+
+-spec reporter_config_spec(mongoose_config_spec:config_section(), binary()) ->
+          mongoose_config_spec:config_section().
+reporter_config_spec(BaseSpec, Reporter) ->
+    mongoose_config_utils:merge_sections(BaseSpec, reporter_config_spec(Reporter)).
+
+-spec reporter_config_spec(binary()) -> mongoose_config_spec:config_section().
+reporter_config_spec(<<"graphite">>) ->
+    #section{items = #{<<"prefix">> => #option{type = string},
+                       <<"env_prefix">> => #option{type = string},
+                       <<"connect_timeout">> => #option{type = integer, validate = positive},
+                       <<"host">> => #option{type = string, validate = network_address},
+                       <<"port">> => #option{type = integer, validate = port},
+                       <<"api_key">> => #option{type = string}},
+             defaults = #{<<"connect_timeout">> => 5000, % milliseconds
+                          <<"port">> => 2003,
+                          <<"api_key">> => ""},
+             required = [<<"host">>],
+             process = fun ?MODULE:process_graphite_reporter/2}.
+
+-spec common_reporter_config_spec() -> mongoose_config_spec:config_section().
+common_reporter_config_spec() ->
+    #section{items = #{<<"interval">> => #option{type = integer, validate = positive}},
+             defaults = #{<<"interval">> => 60000} % milliseconds
+            }.
+
+-spec process_graphite_reporter(mongoose_config_parser_toml:path(), map()) ->
+          {reporter_name(), reporter_opts()}.
+process_graphite_reporter(_Path, #{host := Host, port := Port} = Opts) ->
+    Name = list_to_atom(lists:flatten(io_lib:format("graphite:~s:~p", [Host, Port]))),
+    {Name, Opts#{module => exometer_report_graphite}}.
+
+-spec start(opts()) -> ok.
+start(#{all_metrics_are_global := AllGlobal, report := Reporters}) ->
     Prefixes = [{HostType, make_host_type_prefix(HostType, AllGlobal)}
                 || HostType <- ?ALL_HOST_TYPES],
-    persistent_term:put(?PREFIXES, maps:from_list(Prefixes)).
+    persistent_term:put(?PREFIXES, maps:from_list(Prefixes)),
+    maps:foreach(fun add_reporter/2, Reporters).
 
--spec stop() -> ok.
-stop() ->
+-spec stop(opts()) -> ok.
+stop(#{report := Reporters}) ->
+    maps:foreach(fun remove_reporter/2, Reporters),
     persistent_term:erase(?PREFIXES),
     ok.
+
+-spec add_reporter(reporter_name(), reporter_opts()) -> ok | {error, any()}.
+add_reporter(Name, Opts) ->
+    exometer_report:add_reporter(Name, maps:to_list(maps:remove(interval, Opts))).
+
+-spec remove_reporter(reporter_name(), reporter_opts()) -> ok | {error, any()}.
+remove_reporter(Name, _Opts) ->
+    exometer_report:remove_reporter(Name).
 
 -spec set_up(mongoose_instrument:event_name(), mongoose_instrument:labels(),
              mongoose_instrument:config()) -> boolean().
@@ -51,7 +116,26 @@ set_up_metric(EventName, Labels, MetricName, MetricType) ->
     try exometer:new(Name, MetricType)
     catch
         error:exists -> ok = exometer:reset(Name)
-    end.
+    end,
+    subscribe_reporters(Name, MetricType).
+
+-spec subscribe_reporters(exometer:name(), exometer:type()) -> ok.
+subscribe_reporters(Name, Type) ->
+    maps:foreach(
+      fun(ReporterName, #{interval := Interval}) ->
+              case exometer_report:subscribe(ReporterName, Name, datapoints(Type), Interval) of
+                  ok ->
+                      ok;
+                  Other ->
+                      ?LOG_ERROR(#{what => metrics_subscribe_failed,
+                                   reporter => ReporterName, metric_name => Name,
+                                   reason => Other})
+              end
+      end, mongoose_config:get_opt([instrumentation, exometer, report])).
+
+datapoints(counter) -> [value];
+datapoints(histogram) -> [min, mean, max, median, 95, 99, 999];
+datapoints(_) -> default.
 
 -spec handle_metric_event(mongoose_instrument:event_name(), mongoose_instrument:labels(),
                           mongoose_instrument:metric_name(), mongoose_instrument:metric_type(),

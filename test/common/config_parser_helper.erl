@@ -1108,7 +1108,17 @@ default_config([instrumentation]) ->
 default_config([instrumentation, log]) ->
     #{level => debug};
 default_config([instrumentation, exometer]) ->
-    #{all_metrics_are_global => false};
+    #{all_metrics_are_global => false,
+      report => #{}};
+default_config([instrumentation, exometer, report, Name]) ->
+    Common = #{interval => 60000},
+    case atom_to_list(Name) of
+        "graphite:" ++ _ ->
+            Common#{module => exometer_report_graphite,
+                    port => 2003,
+                    connect_timeout => 5000,
+                    api_key => ""}
+    end;
 default_config([instrumentation, _]) ->
     #{};
 default_config([listen, http]) ->

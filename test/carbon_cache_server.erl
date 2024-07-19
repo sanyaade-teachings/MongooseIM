@@ -20,20 +20,25 @@ server(LS, Parent) ->
 
 server(LS) ->
     case gen_tcp:accept(LS) of
-        {ok,S} ->
-            loop(S),
+        {ok, S} ->
+            loop(S, []),
             server(LS);
         Other ->
-            ct:log("accept returned ~w - goodbye!~n",[Other])
+            ct:log("accept returned ~w - goodbye!~n", [Other])
     end.
 
-loop(S) ->
+loop(S, Pids) ->
     inet:setopts(S, [{active, once}]),
     receive
+        {subscribe, Pid} ->
+            loop(S, [Pid | Pids]);
         {tcp, S, Data} ->
-            ct:log("Carbon cache server received packet: ~p", [Data]),
-            exometer:update([carbon, packets], 1),
-            loop(S);
+            %% Printout disabled because it is very verbose
+            %% ct:log("Carbon cache server received packet: ~p", [Data]),
+            [Metric, ValueStr, TimeStamp] = string:tokens(Data, " \n"),
+            Msg = {packet, Metric, list_to_integer(ValueStr), list_to_integer(TimeStamp)},
+            [Pid ! Msg || Pid <- Pids],
+            loop(S, Pids);
         {tcp_closed, S} ->
             ct:log("Socket ~w closed [~w]~n", [S, self()])
     end.
